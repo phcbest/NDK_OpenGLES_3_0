@@ -2,6 +2,11 @@ package com.byteflow.app
 
 import android.opengl.GLSurfaceView
 import android.os.Bundle
+import android.view.MotionEvent
+import android.widget.Button
+import android.widget.SeekBar
+import android.widget.LinearLayout
+import android.widget.FrameLayout
 import androidx.appcompat.app.AppCompatActivity
 
 /**
@@ -15,17 +20,66 @@ class TestActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        setContentView(R.layout.activity_test)
         
         // 初始化 GLSurfaceView
-        glSurfaceView = GLSurfaceView(this)
-        glSurfaceView.setEGLContextClientVersion(3)
+        glSurfaceView = GLSurfaceView(this).apply {
+            setEGLContextClientVersion(3)
+            photoRenderer = PhotoRenderer(context)
+            setRenderer(photoRenderer)
+            renderMode = GLSurfaceView.RENDERMODE_CONTINUOUSLY
+        }
         
-        // 设置渲染器
-        photoRenderer = PhotoRenderer(this)
-        glSurfaceView.setRenderer(photoRenderer)
-        glSurfaceView.renderMode = GLSurfaceView.RENDERMODE_WHEN_DIRTY
+        // 将 GLSurfaceView 添加到容器中
+        findViewById<FrameLayout>(R.id.glSurfaceContainer).addView(glSurfaceView)
         
-        setContentView(glSurfaceView)
+        // 设置强度调节SeekBar
+        findViewById<SeekBar>(R.id.strengthSeekBar).setOnSeekBarChangeListener(
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    photoRenderer.setEffectStrength(progress / 100f)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            }
+        )
+
+        // 设置半径调节SeekBar
+        findViewById<SeekBar>(R.id.radiusSeekBar).setOnSeekBarChangeListener(
+            object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(seekBar: SeekBar?, progress: Int, fromUser: Boolean) {
+                    photoRenderer.setEffectRadius(progress / 100f)
+                }
+                override fun onStartTrackingTouch(seekBar: SeekBar?) {}
+                override fun onStopTrackingTouch(seekBar: SeekBar?) {}
+            }
+        )
+
+        // 设置确认按钮
+        findViewById<Button>(R.id.confirmButton).setOnClickListener {
+            photoRenderer.confirmEffect()
+        }
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (event.y < glSurfaceView.height) {  // 只处理GLSurfaceView区域的触摸
+            val x = event.x
+            val y = event.y
+            
+            // 修正坐标转换
+            val normalizedX = x / glSurfaceView.width
+            val normalizedY = y / glSurfaceView.height
+            
+            when (event.action) {
+                MotionEvent.ACTION_DOWN, MotionEvent.ACTION_MOVE -> {
+                    photoRenderer.updateTouchPosition(normalizedX, normalizedY)
+                }
+                MotionEvent.ACTION_UP -> {
+                    photoRenderer.clearEffect()
+                }
+            }
+        }
+        return true
     }
 
     override fun onPause() {

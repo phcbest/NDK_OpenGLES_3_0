@@ -37,6 +37,18 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
     """.trimIndent()
 
     // 片段着色器
+    private var touchX = 0.5f
+    private var touchY = 0.5f
+    private var effectRadius = 0.15f
+    private var effectStrength = 0.3f
+    private var isEffectActive = false
+    
+    // 添加帧缓冲相关变量
+    private var frameBuffer = 0
+    private var frameBufferTexture = 0
+    private var confirmedTexture = 0
+    private var isFirstFrame = true
+
     private val fragmentShaderCode = """
         #version 300 es
         precision mediump float;
@@ -50,10 +62,20 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
         void main() {
             vec2 coord = vTexCoord;
             float dist = distance(coord, uCenter);
+            
             if(dist < uRadius) {
-                float factor = 1.0 - (dist / uRadius) * uStrength;
-                coord = coord + (coord - uCenter) * factor;
+                // 使用平滑过渡效果，移除中心点
+                float smoothFactor = smoothstep(uRadius, 0.0, dist);
+                float factor = smoothFactor * uStrength;
+                
+                // 向中心方向的位移
+                vec2 direction = normalize(uCenter - coord);
+                coord += direction * factor * 0.1;
+                
+                // 处理边缘像素
+                coord = clamp(coord, 0.0, 1.0);
             }
+            
             fragColor = texture(uTexture, coord);
         }
     """.trimIndent()
@@ -67,8 +89,9 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
         // 初始化顶点数据
         initVertexData()
         
-        // 加载纹理
-        loadTexture()
+        // 初始化纹理和帧缓冲
+        initTextures()
+        initFrameBuffer()
     }
 
     override fun onSurfaceChanged(gl: GL10?, width: Int, height: Int) {
@@ -91,10 +114,14 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
         val mvpMatrixHandle = GLES30.glGetUniformLocation(mProgram, "uMVPMatrix")
         GLES30.glUniformMatrix4fv(mvpMatrixHandle, 1, false, mMVPMatrix, 0)
         
-        // 设置凹陷效果参数
-        GLES30.glUniform2f(GLES30.glGetUniformLocation(mProgram, "uCenter"), 0.5f, 0.5f)
-        GLES30.glUniform1f(GLES30.glGetUniformLocation(mProgram, "uRadius"), 0.3f)
-        GLES30.glUniform1f(GLES30.glGetUniformLocation(mProgram, "uStrength"), 0.5f)
+        // 设置修脸效果参数
+        if (isEffectActive) {
+            GLES30.glUniform2f(GLES30.glGetUniformLocation(mProgram, "uCenter"), touchX, touchY)
+            GLES30.glUniform1f(GLES30.glGetUniformLocation(mProgram, "uRadius"), effectRadius)
+            GLES30.glUniform1f(GLES30.glGetUniformLocation(mProgram, "uStrength"), effectStrength)
+        } else {
+            GLES30.glUniform1f(GLES30.glGetUniformLocation(mProgram, "uStrength"), 0.0f)
+        }
         
         // 绘制
         drawPhoto()
@@ -128,10 +155,10 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
         )
         
         val texCoords = floatArrayOf(
-            0.0f, 0.0f,  // 左下
-            1.0f, 0.0f,  // 右下
-            0.0f, 1.0f,  // 左上
-            1.0f, 1.0f   // 右上
+            0.0f, 1.0f,  // 左下
+            1.0f, 1.0f,  // 右下
+            0.0f, 0.0f,  // 左上
+            1.0f, 0.0f   // 右上
         )
         
         vertexBuffer = ByteBuffer.allocateDirect(vertices.size * 4)
@@ -147,12 +174,53 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
         texCoordBuffer.position(0)
     }
 
-    private fun loadTexture() {
-        val textureIds = IntArray(1)
-        GLES30.glGenTextures(1, textureIds, 0)
+    private fun initTextures() {
+        // 创建原始纹理
+        val textureIds = IntArray(2)
+        GLES30.glGenTextures(2, textureIds, 0)
         mTextureId = textureIds[0]
+        confirmedTexture = textureIds[1]
         
-        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, mTextureId)
+        // 加载原始图片到两个纹理
+        loadTexture(mTextureId)
+        loadTexture(confirmedTexture)
+    }
+
+    private fun initFrameBuffer() {
+        val fbs = IntArray(1)
+        val fbTextures = IntArray(1)
+        
+        // 创建帧缓冲
+        GLES30.glGenFramebuffers(1, fbs, 0)
+        frameBuffer = fbs[0]
+        
+        // 创建帧缓冲纹理
+        GLES30.glGenTextures(1, fbTextures, 0)
+        frameBufferTexture = fbTextures[0]
+        
+        // 设置帧缓冲纹理参数
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, frameBufferTexture)
+        GLES30.glTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA, 
+            context.resources.displayMetrics.widthPixels,
+            context.resources.displayMetrics.heightPixels,
+            0, GLES30.GL_RGBA, GLES30.GL_UNSIGNED_BYTE, null)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
+        
+        // 绑定帧缓冲和纹理
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, frameBuffer)
+        GLES30.glFramebufferTexture2D(GLES30.GL_FRAMEBUFFER, GLES30.GL_COLOR_ATTACHMENT0,
+            GLES30.GL_TEXTURE_2D, frameBufferTexture, 0)
+        
+        // 解绑
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, 0)
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+    }
+
+    private fun loadTexture(textureId: Int) {
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, textureId)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_S, GLES30.GL_CLAMP_TO_EDGE)
+        GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_WRAP_T, GLES30.GL_CLAMP_TO_EDGE)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MIN_FILTER, GLES30.GL_LINEAR)
         GLES30.glTexParameteri(GLES30.GL_TEXTURE_2D, GLES30.GL_TEXTURE_MAG_FILTER, GLES30.GL_LINEAR)
         
@@ -176,5 +244,41 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
         
         // 绘制矩形
         GLES30.glDrawArrays(GLES30.GL_TRIANGLE_STRIP, 0, 4)
+    }
+
+    fun updateTouchPosition(x: Float, y: Float) {
+        touchX = x
+        touchY = y
+        isEffectActive = true
+    }
+
+    fun clearEffect() {
+        isEffectActive = false
+    }
+
+    fun setEffectRadius(radius: Float) {
+        effectRadius = radius
+    }
+
+    fun setEffectStrength(strength: Float) {
+        effectStrength = strength
+    }
+
+    fun confirmEffect() {
+        // 将当前效果确认到确认纹理
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, frameBuffer)
+        drawPhoto()
+        
+        // 将帧缓冲的内容复制到确认纹理
+        GLES30.glBindTexture(GLES30.GL_TEXTURE_2D, confirmedTexture)
+        GLES30.glCopyTexImage2D(GLES30.GL_TEXTURE_2D, 0, GLES30.GL_RGBA,
+            0, 0, context.resources.displayMetrics.widthPixels,
+            context.resources.displayMetrics.heightPixels, 0)
+        
+        // 重置绑定
+        GLES30.glBindFramebuffer(GLES30.GL_FRAMEBUFFER, 0)
+        
+        // 更新绘制源为确认纹理
+        mTextureId = confirmedTexture
     }
 } 
