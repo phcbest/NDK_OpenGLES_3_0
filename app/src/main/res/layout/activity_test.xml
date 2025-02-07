@@ -74,5 +74,11 @@
             android:text="确认效果"
             android:textSize="16sp"
             android:padding="12dp"/>
+
+        <Button
+            android:id="@+id/expandModeButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="外扩模式"/>
     </LinearLayout>
 </LinearLayout>

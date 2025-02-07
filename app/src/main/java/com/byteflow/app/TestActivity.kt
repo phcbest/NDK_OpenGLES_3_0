@@ -59,6 +59,12 @@ class TestActivity : AppCompatActivity() {
         findViewById<Button>(R.id.confirmButton).setOnClickListener {
             photoRenderer.confirmEffect()
         }
+
+        // 添加内缩/外扩切换按钮
+        findViewById<Button>(R.id.expandModeButton).setOnClickListener {
+            photoRenderer.toggleExpandMode()
+            (it as Button).text = if (it.text == "外扩模式") "内缩模式" else "外扩模式"
+        }
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {

@@ -49,6 +49,9 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
     private var confirmedTexture = 0
     private var isFirstFrame = true
 
+    // 添加变量控制内缩或外扩
+    private var isExpanding = true  // true为外扩，false为内缩
+
     private val fragmentShaderCode = """
         #version 300 es
         precision mediump float;
@@ -57,6 +60,7 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
         uniform vec2 uCenter;
         uniform float uRadius;
         uniform float uStrength;
+        uniform bool uIsExpanding;  // 添加uniform变量
         out vec4 fragColor;
         
         void main() {
@@ -64,15 +68,14 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
             float dist = distance(coord, uCenter);
             
             if(dist < uRadius) {
-                // 使用平滑过渡效果，移除中心点
                 float smoothFactor = smoothstep(uRadius, 0.0, dist);
                 float factor = smoothFactor * uStrength;
                 
-                // 向中心方向的位移
                 vec2 direction = normalize(uCenter - coord);
-                coord += direction * factor * 0.1;
+                // 根据isExpanding决定方向
+                direction *= uIsExpanding ? -1.0 : 1.0;
                 
-                // 处理边缘像素
+                coord += direction * factor * 0.1;
                 coord = clamp(coord, 0.0, 1.0);
             }
             
@@ -107,23 +110,21 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
     override fun onDrawFrame(gl: GL10?) {
         GLES30.glClear(GLES30.GL_COLOR_BUFFER_BIT)
         
-        // 使用程序
         GLES30.glUseProgram(mProgram)
         
-        // 设置MVP矩阵
         val mvpMatrixHandle = GLES30.glGetUniformLocation(mProgram, "uMVPMatrix")
         GLES30.glUniformMatrix4fv(mvpMatrixHandle, 1, false, mMVPMatrix, 0)
         
-        // 设置修脸效果参数
         if (isEffectActive) {
             GLES30.glUniform2f(GLES30.glGetUniformLocation(mProgram, "uCenter"), touchX, touchY)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(mProgram, "uRadius"), effectRadius)
             GLES30.glUniform1f(GLES30.glGetUniformLocation(mProgram, "uStrength"), effectStrength)
+            // 添加expanding状态
+            GLES30.glUniform1i(GLES30.glGetUniformLocation(mProgram, "uIsExpanding"), if(isExpanding) 1 else 0)
         } else {
             GLES30.glUniform1f(GLES30.glGetUniformLocation(mProgram, "uStrength"), 0.0f)
         }
         
-        // 绘制
         drawPhoto()
     }
 
@@ -280,5 +281,10 @@ class PhotoRenderer(private val context: Context) : GLSurfaceView.Renderer {
         
         // 更新绘制源为确认纹理
         mTextureId = confirmedTexture
+    }
+
+    // 添加切换方法
+    fun toggleExpandMode() {
+        isExpanding = !isExpanding
     }
 } 
